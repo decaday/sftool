@@ -123,21 +123,26 @@ fn elf_to_bin(elf_file: &Path) -> Result<Vec<WriteFlashFile>, std::io::Error> {
     let mmap = unsafe { Mmap::map(&file)? };
     let elf = goblin::elf::Elf::parse(&mmap[..])
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
-    let mut address = 0;
-    let mut temp_file = tempfile()?;
+    
     for ph in elf.program_headers.iter() {
         if ph.p_type == goblin::elf::program_header::PT_LOAD {
             let offset = ph.p_offset;
             let size = ph.p_filesz;
+            let address = ph.p_vaddr as u32; // 使用程序头的虚拟地址作为起始地址
+            if address < 0x2000_0000 { // 不用烧录RAM中的内容
             let data = &mmap[offset as usize..(offset + size) as usize];
+                let mut temp_file = tempfile()?;
             temp_file.write_all(data)?;
-            let crc32 = get_file_crc32(&temp_file.try_clone()?)?;
+                // 将文件指针移回开头以计算 CRC
+                temp_file.seek(std::io::SeekFrom::Start(0))?;
+                let crc32 = get_file_crc32(&temp_file)?;
+
             write_flash_files.push(WriteFlashFile {
                 address,
-                file: temp_file.try_clone()?,
+                    file: temp_file,
                 crc32,
             });
-            address += size as u32;
+            }
         }
     }
 
